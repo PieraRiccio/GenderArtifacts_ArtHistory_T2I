@@ -4,9 +4,9 @@
 
 ---
 
-| Metric | Description | Folder |
+| Metric | Description | Folder Name |
 |---|---|---|
-| **PixelSGA** | Measures gender artifacts via pixel-space manipulations (resolution, color) | [`PixelSGA/`](./PixelSGA/) |
-| **MaskSGA** | Measures gender artifacts via background/foreground masking | [`MaskSGA/`](./MaskSGA/) |
+| **PixelSGA** | Measures gender artifacts via pixel-space manipulations (resolution, color) | PixelSGA |
+| **MaskSGA** | Measures gender artifacts via background/foreground masking | MaskSGA |
 
 Details on how to compute each metric are available in the respective folders.
