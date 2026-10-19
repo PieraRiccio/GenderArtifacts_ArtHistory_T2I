@@ -1,6 +1,6 @@
 # Gender Artifacts from Art History to Text-to-Image Generation
 
-> This is the anonymous repository for the paper **"Gender Artifacts from Art History to Text-to-Image Generation"**, currently under review.
+> This is the repository for the paper **"Gender Artifacts from Art History to Text-to-Image Generation"**, to be published at NeurIPS 2026.
 
 ---
 
