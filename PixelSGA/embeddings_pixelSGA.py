@@ -5,6 +5,7 @@ import numpy as np
 import torch
 from PIL import Image
 import open_clip
+import argparse
 
 
 torch.manual_seed(0)
@@ -96,19 +97,60 @@ def encode_pixel_resolutions(
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Extract OpenCLIP image embeddings for PixelSGA."
+    )
 
-    BASE_INPUT_PATH = "add your path here"   # root folder with resolution subfolders
-    OUTPUT_PATH     = "add your path here"   # folder where .npy files will be saved
-    RESOLUTIONS     = [224, 112, 56, 28, 14, 7, 4, 2, 1]
-    SUBRES_PREFIX   = "subres_"              # prefix of resolution subfolder names
+    parser.add_argument(
+        "--base_input_path",
+        type=str,
+        required=True,
+        help="Root folder containing subres_* directories."
+    )
+    parser.add_argument(
+        "--output_path",
+        type=str,
+        required=True,
+        help="Directory where embedding .npy files will be saved."
+    )
+    parser.add_argument(
+        "--resolutions",
+        type=int,
+        nargs="+",
+        default=[224, 112, 56, 28, 14, 7, 4, 2, 1],
+        help="Resolutions to process."
+    )
+    parser.add_argument(
+        "--subres_prefix",
+        type=str,
+        default="subres_",
+        help="Prefix used for resolution directories."
+    )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="convnext_base_w",
+        help="OpenCLIP model architecture."
+    )
+    parser.add_argument(
+        "--pretrained",
+        type=str,
+        default="laion2b_s13b_b82k_augreg",
+        help="OpenCLIP pretrained weights."
+    )
 
-    model, preprocess = load_model()
+    args = parser.parse_args()
+
+    model, preprocess = load_model(
+        model_name=args.model_name,
+        pretrained=args.pretrained
+    )
 
     encode_pixel_resolutions(
         model=model,
         preprocess=preprocess,
-        base_input_path=BASE_INPUT_PATH,
-        output_path=OUTPUT_PATH,
-        resolutions=RESOLUTIONS,
-        subres_prefix=SUBRES_PREFIX,
+        base_input_path=args.base_input_path,
+        output_path=args.output_path,
+        resolutions=args.resolutions,
+        subres_prefix=args.subres_prefix,
     )
