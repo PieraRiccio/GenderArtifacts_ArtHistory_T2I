@@ -1,5 +1,6 @@
 import os
 from PIL import Image
+import argparse
 
 
 
@@ -114,9 +115,15 @@ def convert_folder_to_binary(folder_path, threshold=128):
 if __name__ == "__main__":
 
 
-    INPUT_FEMALE  = "add your path here"   # folder with female images
-    INPUT_MALE    = "add your path here"   # folder with male images
-    OUTPUT_BASE   = "add your path here"   # root output folder
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_female", required=True)
+    parser.add_argument("--input_male", required=True)
+    parser.add_argument("--output_base", required=True)
+    args = parser.parse_args()
+
+    INPUT_FEMALE = args.input_female
+    INPUT_MALE = args.input_male
+    OUTPUT_BASE = args.output_base
 
 
     resolutions     = [224, 112, 56, 28, 14, 7, 4, 2, 1]
