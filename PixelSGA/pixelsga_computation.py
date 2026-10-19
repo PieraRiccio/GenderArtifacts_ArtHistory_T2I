@@ -1,27 +1,46 @@
+
 import os
 import json
 import csv
+import argparse
 from typing import Dict, List, Optional
 
 
-def compute_sga1_from_dict(data: Dict, resolutions: Optional[List[str]] = None) -> float:
+def compute_sga1_from_dict(
+    data: Dict,
+    resolutions: Optional[List[str]] = None,
+) -> float:
 
     if resolutions is None:
         resolutions = ["14", "7", "4", "2", "1"]
 
-    category = next(iter(data))
-    results = data[category]
+    # Current KNN output has resolution keys directly at the top level.
+    # Also support the older nested JSON structure.
+    results = data
+    if not any(
+        f"{res}{suffix}" in results
+        for res in resolutions
+        for suffix in ["", "g", "bw"]
+    ):
+        if data and isinstance(next(iter(data.values())), dict):
+            results = next(iter(data.values()))
 
     selected_values = []
 
     for res in resolutions:
         candidates = [
-            results[f"{res}{suffix}"]["balanced_accuracy"]
+            results[key]["balanced_accuracy"]
             for suffix in ["", "g", "bw"]
-            if f"{res}{suffix}" in results
+            if (key := f"{res}{suffix}") in results
+            and isinstance(results[key], dict)
+            and "balanced_accuracy" in results[key]
         ]
+
         if not candidates:
-            raise ValueError(f"No values found for resolution {res}")
+            raise ValueError(
+                f"No balanced accuracy values found for resolution {res}"
+            )
+
         selected_values.append(max(candidates))
 
     return sum(selected_values) / len(selected_values)
@@ -30,16 +49,20 @@ def compute_sga1_from_dict(data: Dict, resolutions: Optional[List[str]] = None) 
 def compute_sga1_from_folder(
     folder_path: str,
     output_csv_path: str,
-    filename_key: str,
+    filename_key: str = "k5_",
     resolutions: Optional[List[str]] = None,
-    skip_pattern: Optional[str] = None,
+    skip_pattern: Optional[str] = "bg_k5",
 ):
+
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"Input folder not found: {folder_path}")
 
     results_list = []
 
     for filename in sorted(os.listdir(folder_path)):
         if not (filename.endswith(".json") and filename_key in filename):
             continue
+
         if skip_pattern and skip_pattern in filename:
             continue
 
@@ -49,33 +72,58 @@ def compute_sga1_from_folder(
             data = json.load(f)
 
         value = compute_sga1_from_dict(data, resolutions=resolutions)
-        style = filename.split(filename_key)[1].replace(".json", "")
-        print(f"{style}: {value:.4f}")
 
-        results_list.append([style, value])
+        # Use the filename to identify each case.
+        case = filename.split(filename_key, 1)[1].removesuffix(".json")
 
-    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
+        print(f"{case}: {value:.4f}")
+        results_list.append([case, value])
+
+    if not results_list:
+        raise ValueError(
+            f"No matching JSON files found in {folder_path}. "
+            f"Check --filename_key and --skip_pattern."
+        )
+
+    output_dir = os.path.dirname(output_csv_path)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
 
     with open(output_csv_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(["style", "sga1"])
+        writer.writerow(["case", "sga1"])
         writer.writerows(results_list)
 
     print(f"\nResults saved to: {output_csv_path}")
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Compute SGA1 scores from KNN result JSON files."
+    )
 
-    FOLDER_PATH      = "add your path here"       # folder with JSON files
-    OUTPUT_CSV_PATH  = "add your path here"       # full path for output CSV
-    FILENAME_KEY     = "k5_"                      # key to filter files and extract style name
-    SKIP_PATTERN     = "bg_k5"                    # skip files containing this (None to disable)
-    RESOLUTIONS      = ["14", "7", "4", "2", "1"]
+    parser.add_argument("--folder_path", required=True,
+                        help="Folder containing the result JSON files.")
+    parser.add_argument("--output_csv_path", required=True,
+                        help="Path for the output CSV file.")
+    parser.add_argument("--filename_key", default="k5_",
+                        help="Only process filenames containing this string.")
+    parser.add_argument("--skip_pattern", default="bg_k5",
+                        help="Skip filenames containing this string. "
+                             "Pass an empty string to disable.")
+    parser.add_argument(
+        "--resolutions",
+        nargs="+",
+        default=["14", "7", "4", "2", "1"],
+        help="Resolutions to include in the SGA1 calculation."
+    )
 
-    compute_pixelsga_from_folder(
-        folder_path=FOLDER_PATH,
-        output_csv_path=OUTPUT_CSV_PATH,
-        filename_key=FILENAME_KEY,
-        resolutions=RESOLUTIONS,
-        skip_pattern=SKIP_PATTERN,
+    args = parser.parse_args()
+
+    compute_sga1_from_folder(
+        folder_path=args.folder_path,
+        output_csv_path=args.output_csv_path,
+        filename_key=args.filename_key,
+        resolutions=args.resolutions,
+        skip_pattern=args.skip_pattern or None,
     )
