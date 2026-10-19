@@ -1,53 +1,111 @@
 # PixelSGA
 
-This folder contains the pipeline to compute the **PixelSGA** metric, which measures gender artifacts in images through pixel-space manipulations.
+## Pipeline
 
----
+The evaluation consists of four steps:
 
-## Pipeline Overview
+1. **Pixelation:** Generate pixelated images at multiple resolutions, together with grayscale and binary variants.
+2. **Embedding extraction:** Extract image embeddings using a pretrained OpenCLIP model.
+3. **k-NN classification:** Evaluate the embeddings using balanced leave-one-out predictions and compute balanced accuracy.
+4. **PixelSGA computation:** Aggregate the balanced accuracy results into a single PixelSGA score.
 
+Each script can be executed independently through command-line arguments.
+
+## Repository structure
+
+```text
+PixelSGA/
+├── pixelation.py
+├── embeddings_PixelSGA.py
+├── knn_classification_pixelSGA.py
+├── pixelsga_computation.py
+├── requirements.txt
+└── README.md
 ```
-Raw Images
-    │
-    ▼
-1. Image Processing       pixelation.py
-    │
-    ▼
-2. CLIP Embedding         embeddings_pixelSGA.py
-    │
-    ▼
-3. kNN Classification     knn_classification_pixelSGA.py
-    │
-    ▼
-4. Metric Computation     pixelsga_computation.py
+
+## Requirements
+
+Install the dependencies from this directory:
+
+```bash
+python -m pip install -r requirements.txt
 ```
 
----
+Embedding extraction requires `open_clip_torch`, which provides the `open_clip` Python module.
 
-## Step-by-Step Instructions
+## Usage
 
-### Step 1 — Image Processing
-**Script:** `pixelation.py`
+The examples below illustrate how to run the pipeline for one case. Replace the example paths with the paths to your data.
 
-Process the raw images by applying pixelation at multiple resolutions and converting to grayscale and binary color spaces. This generates the full set of manipulated image variants used in the pipeline.
+### 1. Pixelate images
 
----
+```bash
+python pixelation.py \
+  --input_female "/path/to/female_images" \
+  --input_male "/path/to/male_images" \
+  --output_base "/path/to/pixelation_output"
+```
 
-### Step 2 — CLIP Embedding Extraction
-**Script:** `embeddings_pixelSGA.py`
+The script generates processed image collections at the configured resolutions:
 
-Extract CLIP embeddings for each manipulated image folder produced in Step 1. Embeddings are saved as `.npy` files, one per image subfolder.
+`224, 112, 56, 28, 14, 7, 4, 2, 1`
 
----
+It also generates grayscale and binary variants.
 
-### Step 3 — kNN Classification
-**Script:** `knn_classification_pixelSGA.py`
+### 2. Extract embeddings
 
-Run a leave-one-out balanced kNN classifier on the extracted embeddings. Balanced accuracy is computed for each resolution and color variant, and results are saved into a JSON file.
+```bash
+python embeddings_PixelSGA.py \
+  --base_input_path "/path/to/pixelation_output" \
+  --output_path "/path/to/pixelsga_embeddings" \
+  --resolutions 224 112 56 28 14 7 4 2 1
+```
 
----
+The script extracts embeddings for the processed images using the configured OpenCLIP model.
 
-### Step 4 — Metric Computation
-**Script:** `pixelsga_computation.py`
+The model architecture and pretrained weights can be specified using `--model_name` and `--pretrained`, respectively, if these options are supported by the current script.
 
-Aggregate the classification results from Step 3 to compute the final **PixelSGA** score. For each resolution, the best-performing color variant is selected; scores are then averaged across resolutions. Results are saved to a CSV file.
+### 3. Run k-NN classification
+
+```bash
+python knn_classification_pixelSGA.py \
+  --embeddings_dir "/path/to/pixelsga_embeddings" \
+  --output_json "/path/to/pixelsga_results.json" \
+  --k 5 \
+  --resolutions 224 112 56 28 14 7 4 2 1 \
+  --random_state 13
+```
+
+The script evaluates the embeddings and saves balanced accuracy results to a JSON file.
+
+The JSON keys identify the resolution and image variant:
+
+- `"224"`: original pixelated images at resolution 224
+- `"224g"`: grayscale images at resolution 224
+- `"224bw"`: binary images at resolution 224
+
+The same naming convention is used for the other resolutions.
+
+### 4. Compute PixelSGA
+
+```bash
+python pixelsga_computation.py \
+  --json_path "/path/to/pixelsga_results.json" \
+  --output_csv_path "/path/to/pixelsga_summary.csv" \
+  --resolutions 14 7 4 2 1
+```
+
+The script computes the PixelSGA score from a single JSON result file and saves it to a CSV file.
+
+For each selected resolution, it takes the maximum balanced accuracy among the available original, grayscale, and binary variants, then averages these maxima. By default, PixelSGA uses resolutions `14, 7, 4, 2, 1`.
+
+## Outputs
+
+The pipeline produces:
+
+- **Processed images:** Pixelated, grayscale, and binary image collections.
+- **Embeddings:** NumPy (`.npy`) files containing image representations.
+- **Evaluation results:** A JSON file containing balanced accuracy values.
+- **PixelSGA summary:** A CSV file containing the computed PixelSGA score for the case.
+
+Each case should have its own output paths to avoid overwriting results from previous runs.
