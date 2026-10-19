@@ -4,25 +4,27 @@ import numpy as np
 from collections import Counter
 from sklearn.metrics.pairwise import cosine_distances
 from sklearn.metrics import balanced_accuracy_score
+import argparse
 
 
-def save_style_json(style, output_path):
-
-    resolutions = ["224", "112", "56", "28", "14", "7", "4", "2", "1"]
-    variants = ["", "g", "bw"]  # RGB, grayscale, binary
+def save_results_json(output_path, resolutions):
+    """Initialize a JSON file without requiring a style label."""
+    variants = ["", "g", "bw"]
 
     data = {
-        style: {
-            f"{r}{v}": {} for r in resolutions for v in variants
-        }
+        f"{r}{v}": {}
+        for r in map(str, resolutions)
+        for v in variants
     }
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    parent = os.path.dirname(output_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 
     with open(output_path, "w") as f:
         json.dump(data, f, indent=2)
 
-    print(f"JSON saved to:\n{output_path}")
+    print(f"JSON initialized:\n{output_path}")
 
 
 def knn_leave_one_out_balanced_predictions(X, y, k=5, random_state=42):
@@ -59,32 +61,34 @@ def knn_leave_one_out_balanced_predictions(X, y, k=5, random_state=42):
 
     return y_pred
 
-
 def run_knn_and_update_json(
     embeddings_dir,
     json_path,
-    style,
     resolutions=None,
     k=5,
-    random_state=13
+    random_state=13,
 ):
+    """Evaluate male/female embeddings and save results by resolution."""
 
     if resolutions is None:
         resolutions = ["224", "112", "56", "28", "14", "7", "4", "2", "1"]
 
+    resolutions = [str(r) for r in resolutions]
     rng = np.random.default_rng(random_state)
 
     with open(json_path, "r") as f:
         data = json.load(f)
 
-    files = sorted([f for f in os.listdir(embeddings_dir) if f.endswith(".npy")])
+    files = sorted(
+        f for f in os.listdir(embeddings_dir)
+        if f.endswith(".npy")
+    )
     print(f"Found {len(files)} .npy files")
 
-    # (filename suffix, json key suffix)
     variants = [
-        ("", ""),         # RGB
-        ("_gray", "g"),   # grayscale
-        ("_bw", "bw"),    # binary B&W
+        ("", ""),
+        ("_gray", "g"),
+        ("_bw", "bw"),
     ]
 
     for r in resolutions:
@@ -92,14 +96,17 @@ def run_knn_and_update_json(
             key = r + key_suffix
             print(f"\n=== Processing {key} ===")
 
-            # Match exactly 2 files (female + male)
             matched = []
             for fname in files:
                 if file_suffix:
                     if fname.endswith(f"_{r}{file_suffix}.npy"):
                         matched.append(fname)
                 else:
-                    if fname.endswith(f"_{r}.npy") and "_gray" not in fname and "_bw" not in fname:
+                    if (
+                        fname.endswith(f"_{r}.npy")
+                        and "_gray" not in fname
+                        and "_bw" not in fname
+                    ):
                         matched.append(fname)
 
             print(f"Matched files: {len(matched)}")
@@ -107,28 +114,50 @@ def run_knn_and_update_json(
                 print(f"  {fname}")
 
             if len(matched) != 2:
-                print("❌ Expected exactly 2 files (female + male), skipping")
+                print("Expected exactly two files (male + female); skipping.")
                 continue
 
             X_list, y_list = [], []
+            found_labels = set()
 
             for fname in matched:
                 emb = np.load(os.path.join(embeddings_dir, fname))
-                print(f"  Loaded {fname} with shape {emb.shape}")
 
-                if "female" in fname:
-                    X_list.append(emb)
-                    y_list.extend([1] * emb.shape[0])
-                elif "male" in fname:
-                    X_list.append(emb)
-                    y_list.extend([0] * emb.shape[0])
+                if emb.ndim != 2:
+                    raise ValueError(
+                        f"{fname} must contain a 2D array; got {emb.shape}"
+                    )
+
+                print(f"  Loaded {fname}: {emb.shape}")
+
+                lower_name = fname.lower()
+                if "female" in lower_name:
+                    label = 1
+                elif "male" in lower_name:
+                    label = 0
                 else:
-                    raise ValueError(f"Gender not found in filename: {fname}")
+                    raise ValueError(
+                        f"Cannot determine gender from filename: {fname}"
+                    )
+
+                if label in found_labels:
+                    raise ValueError(
+                        f"Duplicate class found among matched files: {fname}"
+                    )
+
+                found_labels.add(label)
+                X_list.append(emb)
+                y_list.extend([label] * len(emb))
+
+            if len({x.shape[1] for x in X_list}) != 1:
+                raise ValueError(
+                    f"Embedding dimensions differ for resolution {r}"
+                )
 
             X = np.concatenate(X_list, axis=0)
-            y = np.array(y_list)
+            y = np.asarray(y_list)
 
-            # Shuffle
+            # Shuffle the combined dataset
             perm = rng.permutation(len(X))
             X, y = X[perm], y[perm]
 
@@ -136,39 +165,54 @@ def run_knn_and_update_json(
             print(f"  Female samples: {(y == 1).sum()}")
             print(f"  Male samples:   {(y == 0).sum()}")
 
-            # Run kNN and compute balanced accuracy
-            y_pred = knn_leave_one_out_balanced_predictions(X, y, k=k)
+            y_pred = knn_leave_one_out_balanced_predictions(
+                X, y, k=k, random_state=random_state
+            )
             bal_acc = balanced_accuracy_score(y, y_pred)
-            print(f"  ✅ Balanced accuracy: {bal_acc:.4f}")
 
-            data[style][key]["balanced_accuracy"] = float(bal_acc)
+            print(f"  Balanced accuracy: {bal_acc:.4f}")
+
+            data.setdefault(key, {})
+            data[key]["balanced_accuracy"] = float(bal_acc)
 
     with open(json_path, "w") as f:
         json.dump(data, f, indent=2)
 
-    print(f"\n✅ JSON written to disk:\n{json_path}")
-
+    print(f"\nResults saved to:\n{json_path}")
 
 
 if __name__ == "__main__":
 
-    STYLE         = "add your style here"      # e.g. "NEUTRAL"
-    EMBEDDINGS_DIR = "add your path here"      # folder with .npy files
-    JSON_PATH      = "add your path here"      # path to output .json file
-    K              = 5
-    RESOLUTIONS    = ["224", "112", "56", "28", "14", "7", "4", "2", "1"]
-
-    # Step 1: Create the JSON structure
-    save_style_json(
-        style=STYLE,
-        output_path=JSON_PATH
+    parser = argparse.ArgumentParser(
+        description="Run balanced leave-one-out kNN on male/female embeddings."
     )
+    parser.add_argument(
+        "--embeddings_dir",
+        required=True,
+        help="Directory containing male and female .npy embeddings.",
+    )
+    parser.add_argument(
+        "--output_json",
+        required=True,
+        help="Output JSON path for classification results.",
+    )
+    parser.add_argument("--k", type=int, default=5)
+    parser.add_argument(
+        "--resolutions",
+        type=str,
+        nargs="+",
+        default=["224", "112", "56", "28", "14", "7", "4", "2", "1"],
+    )
+    parser.add_argument("--random_state", type=int, default=13)
 
-    # Step 2: Run kNN and populate the JSON
+    args = parser.parse_args()
+
+    save_results_json(args.output_json, args.resolutions)
+
     run_knn_and_update_json(
-        embeddings_dir=EMBEDDINGS_DIR,
-        json_path=JSON_PATH,
-        style=STYLE,
-        resolutions=RESOLUTIONS,
-        k=K
+        embeddings_dir=args.embeddings_dir,
+        json_path=args.output_json,
+        resolutions=args.resolutions,
+        k=args.k,
+        random_state=args.random_state,
     )
