@@ -5,7 +5,7 @@
 The evaluation consists of four steps:
 
 1. **Pixelation:** Generate pixelated images at multiple resolutions, together with grayscale and binary variants.
-2. **Embedding extraction:** Extract image embeddings using a pretrained OpenCLIP model.
+2. **Embedding extraction:** Extract image embeddings using a pretrained OpenCLIP or SigLIP model.
 3. **k-NN classification:** Evaluate the embeddings using balanced leave-one-out predictions and compute balanced accuracy.
 4. **PixelSGA computation:** Aggregate the balanced accuracy results into a single PixelSGA score.
 
@@ -31,7 +31,7 @@ Install the dependencies from this directory:
 python -m pip install -r requirements.txt
 ```
 
-Embedding extraction requires `open_clip_torch`, which provides the `open_clip` Python module.
+Embedding extraction supports OpenCLIP and SigLIP. The required packages for both models are included in `requirements.txt`.
 
 ## Usage
 
@@ -54,23 +54,38 @@ It also generates grayscale and binary variants.
 
 ### 2. Extract embeddings
 
+Select the embedding model using `--embedding_model`.
+
+**OpenCLIP:**
+
 ```bash
 python embeddings_PixelSGA.py \
+  --embedding_model clip \
   --base_input_path "/path/to/pixelation_output" \
-  --output_path "/path/to/pixelsga_embeddings" \
+  --output_path "/path/to/pixelsga_embeddings_clip" \
   --resolutions 224 112 56 28 14 7 4 2 1
 ```
 
-The script extracts embeddings for the processed images using the configured OpenCLIP model.
+**SigLIP:**
 
-The model architecture and pretrained weights can be specified using `--model_name` and `--pretrained`, respectively, if these options are supported by the current script.
+```bash
+python embeddings_PixelSGA.py \
+  --embedding_model siglip \
+  --base_input_path "/path/to/pixelation_output" \
+  --output_path "/path/to/pixelsga_embeddings_siglip" \
+  --resolutions 224 112 56 28 14 7 4 2 1
+```
+
+The default SigLIP model is `google/siglip-base-patch16-224`. The OpenCLIP model uses the architecture and pretrained weights configured in the script. Optional model settings can be specified using `--model_name` and `--pretrained`, where supported.
+
+Use separate output directories for different embedding models to avoid overwriting their embeddings.
 
 ### 3. Run k-NN classification
 
 ```bash
 python knn_classification_pixelSGA.py \
-  --embeddings_dir "/path/to/pixelsga_embeddings" \
-  --output_json "/path/to/pixelsga_results.json" \
+  --embeddings_dir "/path/to/pixelsga_embeddings_siglip" \
+  --output_json "/path/to/pixelsga_results_siglip.json" \
   --k 5 \
   --resolutions 224 112 56 28 14 7 4 2 1 \
   --random_state 13
@@ -90,8 +105,8 @@ The same naming convention is used for the other resolutions.
 
 ```bash
 python pixelsga_computation.py \
-  --json_path "/path/to/pixelsga_results.json" \
-  --output_csv_path "/path/to/pixelsga_summary.csv" \
+  --json_path "/path/to/pixelsga_results_siglip.json" \
+  --output_csv_path "/path/to/pixelsga_summary_siglip.csv" \
   --resolutions 14 7 4 2 1
 ```
 
@@ -108,4 +123,6 @@ The pipeline produces:
 - **Evaluation results:** A JSON file containing balanced accuracy values.
 - **PixelSGA summary:** A CSV file containing the computed PixelSGA score for the case.
 
-Each case should have its own output paths to avoid overwriting results from previous runs.
+Each case and embedding model should have its own output paths to avoid overwriting results from previous runs.
+
+For reproducibility, record the embedding model, pretrained weights, and random seed used for each experiment. Different model configurations may produce different PixelSGA scores.
