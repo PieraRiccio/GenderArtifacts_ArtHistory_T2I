@@ -1,11 +1,11 @@
 import os
 import gc
 import random
+import argparse
 import numpy as np
 import torch
 from PIL import Image
 import open_clip
-
 
 
 torch.manual_seed(0)
@@ -17,26 +17,30 @@ torch.backends.cudnn.benchmark = False
 torch.use_deterministic_algorithms(True)
 
 
+IMAGE_EXTENSIONS = (
+    ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp"
+)
 
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tiff", ".webp")
 
 def is_image(filename: str) -> bool:
     return filename.lower().endswith(IMAGE_EXTENSIONS)
 
 
-def load_model(model_name: str = "convnext_base_w", pretrained: str = "laion2b_s13b_b82k_augreg"):
-    """
-    Loads and returns the OpenCLIP model, its transforms, and prints basic info.
-
-    Args:
-        model_name: OpenCLIP model architecture name.
-        pretrained: Pretrained weights identifier.
-    """
-    model, _, preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained)
+def load_model(
+    model_name: str = "convnext_base_w",
+    pretrained: str = "laion2b_s13b_b82k_augreg",
+):
+    """Load the OpenCLIP model and its image preprocessing transform."""
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        model_name, pretrained=pretrained
+    )
     model.cuda()
     model.eval()
 
-    print("Model parameters:", f"{np.sum([int(np.prod(p.shape)) for p in model.parameters()]):,}")
+    print(
+        "Model parameters:",
+        f"{np.sum([int(np.prod(p.shape)) for p in model.parameters()]):,}",
+    )
     print("Context length:", model.context_length)
     print("Vocab size:", model.vocab_size)
 
@@ -45,106 +49,102 @@ def load_model(model_name: str = "convnext_base_w", pretrained: str = "laion2b_s
 
 def encode_images(model, preprocess, folder_path: str, batch_size: int = 1) -> np.ndarray:
     """
-    Encodes all images in a folder using the given model.
+    Encode images in one folder.
 
-    Args:
-        model: OpenCLIP model (on CUDA).
-        preprocess: Preprocessing transform for the model.
-        folder_path: Folder containing images to encode.
-        batch_size: Number of images per batch.
-
-    Returns:
-        Array of shape (N, embedding_dim).
+    Images are processed in sorted filename order. The default batch size is 1,
+    consistent with the project's requirement to avoid observed batch-dependent
+    artifacts.
     """
+    if not os.path.isdir(folder_path):
+        raise FileNotFoundError(f"Input image folder does not exist: {folder_path}")
+
     img_paths = [
         os.path.join(folder_path, fname)
         for fname in sorted(os.listdir(folder_path))
         if is_image(fname)
     ]
 
-    encoded_imgs = np.empty([0, 640])
+    if not img_paths:
+        raise ValueError(f"No supported image files found in: {folder_path}")
 
-    for _ in range(0, len(img_paths), batch_size):
-        batch_paths = img_paths[:batch_size]
+    encoded_batches = []
+
+    for start in range(0, len(img_paths), batch_size):
+        batch_paths = img_paths[start : start + batch_size]
+
         preprocessed = np.stack([
-            preprocess(Image.open(p).convert("RGB")) for p in batch_paths
+            preprocess(Image.open(path).convert("RGB"))
+            for path in batch_paths
         ])
+
         with torch.no_grad():
             features = model.encode_image(
                 torch.tensor(preprocessed, device="cuda")
             ).float().cpu().numpy()
-        encoded_imgs = np.concatenate([encoded_imgs, features], axis=0)
-        img_paths = img_paths[batch_size:]
+
+        encoded_batches.append(features)
         del preprocessed
         gc.collect()
 
-    return encoded_imgs
+    return np.concatenate(encoded_batches, axis=0)
 
 
-def encode_mask_modes(
-    model,
-    preprocess,
-    base_input_path: str,
-    output_path: str,
-    styles: list,
-    modes: list,
-    genders: list,
-    gender_map: dict,
-    folder_structure_fn,
-    output_filename_fn,
-):
+def main():
+    parser = argparse.ArgumentParser(
+        description="Extract OpenCLIP embeddings from pre-generated MaskSGA image folders."
+    )
+    parser.add_argument("--input_man_bg", required=True,
+                        help="Folder containing male/man images with backgrounds masked.")
+    parser.add_argument("--input_man_no_bg", required=True,
+                        help="Folder containing male/man images with only detected people marked.")
+    parser.add_argument("--input_woman_bg", required=True,
+                        help="Folder containing female/woman images with backgrounds masked.")
+    parser.add_argument("--input_woman_no_bg", required=True,
+                        help="Folder containing female/woman images with only detected people marked.")
+    parser.add_argument("--output_path", required=True,
+                        help="Root folder in which the .npy embedding files will be saved.")
+    parser.add_argument("--model_name", default="convnext_base_w",
+                        help="OpenCLIP model architecture.")
+    parser.add_argument("--pretrained", default="laion2b_s13b_b82k_augreg",
+                        help="OpenCLIP pretrained weights identifier.")
+    parser.add_argument("--batch_size", type=int, default=1,
+                        help="Number of images per batch; use 1 to avoid observed batch-dependent artifacts.")
+    args = parser.parse_args()
 
-    for style in styles:
-        for mode in modes:
-            for gender in genders:
-                folder = folder_structure_fn(base_input_path, style, mode, gender)
-                gender_label = gender_map[gender]
+    if args.batch_size < 1:
+        parser.error("--batch_size must be at least 1.")
 
-                print(f"\nProcessing: {folder}")
+    # The input folders are supplied directly; no assumed style/mode/gender
+    # directory hierarchy is required.
+    input_folders = {
+        ("bg", "male"): args.input_man_bg,
+        ("no_bg", "male"): args.input_man_no_bg,
+        ("bg", "female"): args.input_woman_bg,
+        ("no_bg", "female"): args.input_woman_no_bg,
+    }
 
-                features = encode_images(model, preprocess, folder)
+    model, preprocess = load_model(
+        model_name=args.model_name,
+        pretrained=args.pretrained,
+    )
 
-                print(features[:2, 600:605])
-                print(features[-2:, 600:605])
+    for (mode, gender_label), folder in input_folders.items():
+        print(f"\nProcessing {gender_label} / {mode}: {folder}")
+        features = encode_images(
+            model=model,
+            preprocess=preprocess,
+            folder_path=folder,
+            batch_size=args.batch_size,
+        )
 
-                out_file = output_filename_fn(output_path, style, mode, gender_label)
-                os.makedirs(os.path.dirname(out_file), exist_ok=True)
-                np.save(out_file, features)
-                print(f"Saved to: {out_file}")
-
+        output_file = os.path.join(
+            args.output_path,
+            f"{mode}_{gender_label}.npy",
+        )
+        os.makedirs(os.path.dirname(output_file), exist_ok=True)
+        np.save(output_file, features)
+        print(f"Saved embeddings with shape {features.shape} to: {output_file}")
 
 
 if __name__ == "__main__":
-
-    BASE_INPUT_PATH = "add your path here"        # root folder with image data
-    OUTPUT_PATH     = "add your path here"        # root folder for .npy output
-    STYLES          = ["add your styles here"]    # e.g. ["NEUTRAL", "realism"]
-    MODES           = ["bg", "no_bg"]             # background modes
-    GENDERS         = ["man", "woman"]            # gender subfolder names
-    GENDER_MAP      = {"man": "male", "woman": "female"}
-
-    # Define how image folders are structured.
-    # Adjust to match your folder layout.
-    def folder_structure_fn(base_input_path, style, mode, gender):
-        return os.path.join(base_input_path, style, mode, gender)
-
-    # Define how output .npy filenames are constructed.
-    # Adjust to match your naming convention.
-    def output_filename_fn(output_path, style, mode, gender_label):
-        return os.path.join(output_path, style, f"{style}_{mode}_{gender_label}.npy")
-    # ─────────────────────────────────────────────────────────────────
-
-    model, preprocess = load_model()
-
-    encode_mask_modes(
-        model=model,
-        preprocess=preprocess,
-        base_input_path=BASE_INPUT_PATH,
-        output_path=OUTPUT_PATH,
-        styles=STYLES,
-        modes=MODES,
-        genders=GENDERS,
-        gender_map=GENDER_MAP,
-        folder_structure_fn=folder_structure_fn,
-        output_filename_fn=output_filename_fn,
-    )
+    main()
