@@ -6,9 +6,15 @@ import numpy as np
 import torch
 from PIL import Image
 import open_clip
-from transformers import AutoProcessor, SiglipVisionModel
+from transformers import (
+    AutoProcessor,
+    SiglipVisionModel,
+    AutoImageProcessor,
+    Dinov2Model,
+)
 
 
+# Reproducibility
 torch.manual_seed(0)
 if torch.cuda.is_available():
     torch.cuda.manual_seed_all(0)
@@ -42,6 +48,7 @@ def load_model(
     Supported models:
         clip: OpenCLIP
         siglip: Hugging Face SigLIP
+        dinov2: DINOv2, using mean-pooled patch tokens
     """
 
     if embedding_model == "clip":
@@ -74,6 +81,20 @@ def load_model(
 
         return model, processor, DEVICE
 
+    elif embedding_model == "dinov2":
+        if model_name is None:
+            model_name = "facebook/dinov2-with-registers-large"
+
+        processor = AutoImageProcessor.from_pretrained(model_name)
+        model = Dinov2Model.from_pretrained(model_name)
+        model = model.to(DEVICE)
+        model.eval()
+
+        print(f"Loaded DINOv2 model: {model_name}")
+        print("Feature extraction: mean-pooled patch tokens")
+
+        return model, processor, DEVICE
+
     else:
         raise ValueError(
             f"Unsupported embedding model: {embedding_model}"
@@ -90,6 +111,9 @@ def encode_images(
 ) -> np.ndarray:
     """
     Extract image embeddings from all supported images in a folder.
+
+    For DINOv2-with-registers, exclude the CLS token and register
+    tokens, then average the remaining patch tokens.
     """
 
     img_paths = [
@@ -132,6 +156,38 @@ def encode_images(
                 outputs = model(**inputs)
                 features = outputs.pooler_output.float()
 
+            elif embedding_model == "dinov2":
+                inputs = preprocess(
+                    images=images,
+                    return_tensors="pt",
+                )
+                inputs = {
+                    key: value.to(device)
+                    for key, value in inputs.items()
+                }
+
+                outputs = model(**inputs)
+
+                # DINOv2-with-registers:
+                # token 0: CLS token
+                # tokens 1-4: register tokens
+                # tokens 5 onward: patch tokens
+                #
+                # Read the number of register tokens from the model
+                # configuration, falling back to 4 for this model.
+                num_register_tokens = getattr(
+                    model.config,
+                    "num_register_tokens",
+                    4,
+                )
+
+                patch_features = outputs.last_hidden_state[
+                    :, 1 + num_register_tokens:, :
+                ]
+
+                # Dense patch features -> global descriptor
+                features = patch_features.mean(dim=1).float()
+
             else:
                 raise ValueError(
                     f"Unsupported embedding model: {embedding_model}"
@@ -141,6 +197,9 @@ def encode_images(
 
         del images
         gc.collect()
+
+        if device == "cuda":
+            torch.cuda.empty_cache()
 
     return np.concatenate(encoded_imgs, axis=0)
 
@@ -223,9 +282,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--embedding_model",
         type=str,
-        choices=["clip", "siglip"],
+        choices=["clip", "siglip", "dinov2"],
         required=True,
-        help="Embedding model to use: clip or siglip.",
+        help="Embedding model to use: clip, siglip, or dinov2.",
     )
     parser.add_argument(
         "--resolutions",
@@ -244,10 +303,7 @@ if __name__ == "__main__":
         "--model_name",
         type=str,
         default=None,
-        help=(
-            "Model architecture for CLIP or Hugging Face model ID "
-            "for SigLIP. Uses the model-specific default if omitted."
-        ),
+        help="Optional model identifier. Uses the selected model's default if omitted.",
     )
     parser.add_argument(
         "--pretrained",
