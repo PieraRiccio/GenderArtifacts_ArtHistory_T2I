@@ -5,7 +5,7 @@
 The evaluation consists of four steps:
 
 1. **Pixelation:** Generate pixelated images at multiple resolutions, together with grayscale and binary variants.
-2. **Embedding extraction:** Extract image embeddings using a pretrained OpenCLIP or SigLIP model.
+2. **Embedding extraction:** Extract image embeddings using a pretrained OpenCLIP, SigLIP, or DINOv2 model.
 3. **k-NN classification:** Evaluate the embeddings using balanced leave-one-out predictions and compute balanced accuracy.
 4. **PixelSGA computation:** Aggregate the balanced accuracy results into a single PixelSGA score.
 
@@ -31,7 +31,7 @@ Install the dependencies from this directory:
 python -m pip install -r requirements.txt
 ```
 
-Embedding extraction supports OpenCLIP and SigLIP. The required packages for both models are included in `requirements.txt`.
+Embedding extraction supports OpenCLIP, SigLIP, and DINOv2 through OpenCLIP and Hugging Face Transformers.
 
 ## Usage
 
@@ -54,9 +54,9 @@ It also generates grayscale and binary variants.
 
 ### 2. Extract embeddings
 
-Select the embedding model using `--embedding_model`.
+Choose the embedding model using `--embedding_model`.
 
-**OpenCLIP:**
+**OpenCLIP**
 
 ```bash
 python embeddings_PixelSGA.py \
@@ -64,9 +64,12 @@ python embeddings_PixelSGA.py \
   --base_input_path "/path/to/pixelation_output" \
   --output_path "/path/to/pixelsga_embeddings_clip" \
   --resolutions 224 112 56 28 14 7 4 2 1
+  --batch_size 1
 ```
 
-**SigLIP:**
+The default OpenCLIP configuration uses the `convnext_base_w` architecture with the pretrained weights `laion2b_s13b_b82k_augreg`.
+
+**SigLIP**
 
 ```bash
 python embeddings_PixelSGA.py \
@@ -74,18 +77,39 @@ python embeddings_PixelSGA.py \
   --base_input_path "/path/to/pixelation_output" \
   --output_path "/path/to/pixelsga_embeddings_siglip" \
   --resolutions 224 112 56 28 14 7 4 2 1
+  --batch_size 1
 ```
 
-The default SigLIP model is `google/siglip-base-patch16-224`. The OpenCLIP model uses the architecture and pretrained weights configured in the script. Optional model settings can be specified using `--model_name` and `--pretrained`, where supported.
+The default model is `google/siglip-base-patch16-224`. Image embeddings are extracted using the model's pooled visual features.
 
-Use separate output directories for different embedding models to avoid overwriting their embeddings.
+**DINOv2 with dense patch features**
+
+```bash
+python embeddings_PixelSGA.py \
+  --embedding_model dinov2 \
+  --base_input_path "/path/to/pixelation_output" \
+  --output_path "/path/to/pixelsga_embeddings_dinov2" \
+  --resolutions 224 112 56 28 14 7 4 2 1 \
+  --batch_size 1
+```
+
+The default model is `facebook/dinov2-with-registers-large`. The CLS token and register tokens are excluded, and the remaining patch-token features are averaged to produce one global descriptor per image. This is a dense-feature-based representation, rather than an embedding taken from the CLS token.
+
+For all models, `--model_name` can be used to select another compatible model. The `--pretrained` option specifies OpenCLIP pretrained weights. 
+
+***Batch size and batch-dependent artifacts***
+
+The batch size must be set to `1` for all embedding extraction runs. Processing multiple images together may introduce batch-dependent artifacts into the extracted representations. In preliminary experiments, these artifacts were particularly problematic for highly pixelated images, such as 1×1 black-and-white images, where embeddings could become spuriously discriminative when images from different gender groups were processed in separate batches. This could inflate classification accuracy for reasons unrelated to the image content being evaluated.
+
+Processing one image at a time avoids grouping images into batches by gender and ensures that each image is encoded independently. For this reason, use `--batch_size 1` for all models and experiments.
+
 
 ### 3. Run k-NN classification
 
 ```bash
 python knn_classification_pixelSGA.py \
-  --embeddings_dir "/path/to/pixelsga_embeddings_siglip" \
-  --output_json "/path/to/pixelsga_results_siglip.json" \
+  --embeddings_dir "/path/to/pixelsga_embeddings_dinov2" \
+  --output_json "/path/to/pixelsga_results_dinov2.json" \
   --k 5 \
   --resolutions 224 112 56 28 14 7 4 2 1 \
   --random_state 13
@@ -105,8 +129,8 @@ The same naming convention is used for the other resolutions.
 
 ```bash
 python pixelsga_computation.py \
-  --json_path "/path/to/pixelsga_results_siglip.json" \
-  --output_csv_path "/path/to/pixelsga_summary_siglip.csv" \
+  --json_path "/path/to/pixelsga_results_dinov2.json" \
+  --output_csv_path "/path/to/pixelsga_summary_dinov2.csv" \
   --resolutions 14 7 4 2 1
 ```
 
@@ -125,4 +149,4 @@ The pipeline produces:
 
 Each case and embedding model should have its own output paths to avoid overwriting results from previous runs.
 
-For reproducibility, record the embedding model, pretrained weights, and random seed used for each experiment. Different model configurations may produce different PixelSGA scores.
+For reproducibility, record the embedding model, pretrained weights, and random seed used for each experiment. Different models and feature-extraction methods may produce different PixelSGA scores.
