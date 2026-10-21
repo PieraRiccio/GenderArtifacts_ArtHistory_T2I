@@ -1,74 +1,40 @@
-import os
+import argparse
 import json
-import csv
-from typing import Dict, Optional
+import os
 
 
+def compute_sga2(json_path: str) -> float:
+    """
+    Compute MaskSGA as the average balanced accuracy
+    across the bg and no_bg conditions.
+    """
+    if not os.path.isfile(json_path):
+        raise FileNotFoundError(f"JSON file not found: {json_path}")
 
-def compute_sga2_from_dict(data: Dict) -> float:
+    with open(json_path, "r") as f:
+        data = json.load(f)
 
-    category = next(iter(data))
-    results = data[category]
+    bg = data["bg"]["balanced_accuracy"]
+    no_bg = data["no_bg"]["balanced_accuracy"]
 
-    bg = results["bg"]["balanced_accuracy"]
-    no_bg = results["no_bg"]["balanced_accuracy"]
+    sga2 = (bg + no_bg) / 2
 
-    return (bg + no_bg) / 2
+    print(f"BG balanced accuracy:    {bg:.4f}")
+    print(f"No-BG balanced accuracy: {no_bg:.4f}")
+    print(f"MaskSGA (average):       {sga2:.4f}")
 
-
-def compute_sga2_from_folder(
-    folder_path: str,
-    output_csv_path: str,
-    filename_key: str,
-    skip_pattern: Optional[str] = None,
-    sort_descending: bool = False,
-):
-
-    results_list = []
-
-    for filename in sorted(os.listdir(folder_path)):
-        if not (filename.endswith(".json") and filename_key in filename):
-            continue
-        if skip_pattern and skip_pattern in filename:
-            continue
-
-        full_path = os.path.join(folder_path, filename)
-
-        with open(full_path, "r") as f:
-            data = json.load(f)
-
-        value = compute_sga2_from_dict(data)
-        style = filename.split(filename_key)[1].replace(".json", "")
-        print(f"{style}: {value:.4f}")
-
-        results_list.append([style, value])
-
-    if sort_descending:
-        results_list.sort(key=lambda x: x[1], reverse=True)
-
-    os.makedirs(os.path.dirname(output_csv_path), exist_ok=True)
-
-    with open(output_csv_path, "w", newline="") as csvfile:
-        writer = csv.writer(csvfile)
-        writer.writerow(["style", "sga2"])
-        writer.writerows(results_list)
-
-    print(f"\nResults saved to: {output_csv_path}")
-
+    return sga2
 
 
 if __name__ == "__main__":
-
-    FOLDER_PATH      = "add your path here"   # folder with JSON files
-    OUTPUT_CSV_PATH  = "add your path here"   # full path for output CSV
-    FILENAME_KEY     = "k10_"                 # key to filter files and extract style name
-    SKIP_PATTERN     = None                   # skip files containing this (None to disable)
-    SORT_DESCENDING  = True
-
-    compute_sga2_from_folder(
-        folder_path=FOLDER_PATH,
-        output_csv_path=OUTPUT_CSV_PATH,
-        filename_key=FILENAME_KEY,
-        skip_pattern=SKIP_PATTERN,
-        sort_descending=SORT_DESCENDING,
+    parser = argparse.ArgumentParser(
+        description="Compute MaskSGA from a kNN classification results JSON."
     )
+    parser.add_argument(
+        "--json_path",
+        required=True,
+        help="Path to the JSON file containing bg and no_bg balanced accuracies.",
+    )
+    args = parser.parse_args()
+
+    compute_sga2(args.json_path)
