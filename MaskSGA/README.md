@@ -181,3 +181,19 @@ The pipeline produces:
 - **MaskSGA score:** A single scalar computed as the average of the two balanced accuracies.
 
 Each case and embedding model should have its own output paths to avoid overwriting results from previous runs.
+
+## Extra
+
+We also provide the file 
+```text
+MaskSGA/
+├── finetune_resnet.py
+```
+should the readers be interested in implementing the measure of MaskSGA via finetuning a ResNet model and performing balanced accuracy between the two classes under the same masking conditions explained before. 
+
+```bash
+python finetune_resnet.py \
+  --male dir "/path/to/male_folder" \
+  --female_dir "/path/to/female_folder" \
+  --class-weighting loss
+```
