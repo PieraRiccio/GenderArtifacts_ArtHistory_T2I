@@ -150,3 +150,21 @@ The pipeline produces:
 Each case and embedding model should have its own output paths to avoid overwriting results from previous runs.
 
 For reproducibility, record the embedding model, pretrained weights, and random seed used for each experiment. Different models and feature-extraction methods may produce different PixelSGA scores.
+
+## Extra
+
+We also provide the file 
+```text
+PixelSGA/
+├── finetune_resnet.py
+```
+should the readers be interested in implementing the measure of PixelSGA via finetuning a ResNet model and performing balanced accuracy between the two classes under the same pixelation conditions explained before. 
+
+```bash
+python finetune_resnet.py \
+  --male dir "/path/to/male_folder" \
+  --female_dir "/path/to/female_folder" \
+  --class-weighting loss
+```
+
+
