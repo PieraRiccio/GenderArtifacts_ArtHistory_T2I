@@ -1,7 +1,7 @@
 # Gender Artifacts from Art History to Text-to-Image Generation
 Piera Riccio, Miriam Doh, Benedikt Hoeltgen, Noa Garcia, Nanne van Noord
 
-This repository contains the code for **“Gender Artifacts from Art History to Text-to-Image Generation,”** a paper to be published at **NeurIPS 2026**.
+This repository contains the code for **“Gender Artifacts from Art History to Text-to-Image Generation,”** a paper to be published at **NeurIPS 2026** Evaluation & Datasets track.
 
 We provide two complementary metrics for investigating gender-related artifacts in sets of images, each implemented in its own directory.
 
